@@ -1,0 +1,20 @@
+[
+  {
+    "id": "ISSUE-001",
+    "severity": "CRITICAL",
+    "title": "Unsafe SQL construction",
+    "file": "app/query.py:42",
+    "problem": "Unsafe string interpolation into SQL query allows injection",
+    "fix": "Use parameterized queries (db.execute(query, params))",
+    "status": "open"
+  },
+  {
+    "id": "ISSUE-002",
+    "severity": "HIGH",
+    "title": "Use of eval on untrusted data",
+    "file": "scripts/build.py:10",
+    "problem": "eval is used on input that may be attacker-controlled",
+    "fix": "Replace eval with ast.literal_eval or a safer parser",
+    "status": "open"
+  }
+]
