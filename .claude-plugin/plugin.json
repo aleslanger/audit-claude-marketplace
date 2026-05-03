@@ -11,5 +11,6 @@
     "audit",
     "code-review",
     "workflows"
-  ]
+  ],
+  "skills": "./skills/"
 }
