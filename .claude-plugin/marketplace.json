@@ -6,7 +6,14 @@
   "owner": { "name": "aleslanger", "displayName": "Aleš Langer" },
   "license": "MIT",
   "plugins": [
-    { "manifest": "plugin.json" }
+    {
+      "name": "audit-claude-marketplace",
+      "source": "./",
+      "description": "A curated collection of Claude Code skills",
+      "version": "0.1.0",
+      "author": { "name": "Aleš Langer" },
+      "skillsDir": "skills/"
+    }
   ],
   "skillsDir": "skills/"
 }
