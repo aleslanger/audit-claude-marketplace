@@ -13,5 +13,5 @@
     "code-review",
     "workflows"
   ],
-  "skills": "./skills/"
+  "skills": ["./skills/"]
 }
