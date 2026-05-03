@@ -187,6 +187,21 @@ Total issues: <N> (CRITICAL: X · HIGH: Y · MEDIUM: Z · LOW: W)
 - Total issue count by severity
 - Whether CRITICAL issues exist (blocks commit until resolved)
 
+### Next steps (how to run quality-loop)
+
+- Local (recommended):
+  - Preview (dry-run): `python3 scripts/quality_loop.py --plan FIX_PLAN.md --dry-run`
+  - Apply commits locally (no push): `python3 scripts/quality_loop.py --plan FIX_PLAN.md --apply --no-push`
+  - Push branch and open PR: `git push origin fix/YYYYMMDD-quality-loop` then open a PR via the GitHub UI or `gh pr create`
+
+- From a client (Claude / Copilot / Gemini):
+  - Some clients use `/skills` instead of `/skill`. If `/skill` fails, run `/skills` to list available commands.
+  - Then run the workflow command shown by your client, for example: `/skills quality-loop --plan FIX_PLAN.md --dry-run`
+
+Notes:
+- Always run `--dry-run` first and inspect generated commits before pushing.
+- If your client reports "Unknown command", list commands or verify the marketplace/plugin is installed and up to date.
+
 ## Severity Mapping
 
 | Level | Meaning |
