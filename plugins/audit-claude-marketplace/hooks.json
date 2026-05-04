@@ -1,0 +1,18 @@
+{
+  "PostToolUse": [
+    {
+      "matcher": "Write",
+      "hooks": [
+        {
+          "type": "command",
+          "command": [
+            "bash",
+            "scripts/hooks/fix-plan-suggest-quality-loop.sh"
+          ]
+        }
+      ],
+      "description": "Suggest quality-loop when FIX_PLAN.md is written by audit-to-plan skill",
+      "id": "post:write:fix-plan-suggest-quality-loop"
+    }
+  ]
+}
