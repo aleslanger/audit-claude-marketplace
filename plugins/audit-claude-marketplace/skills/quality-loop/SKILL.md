@@ -15,16 +15,16 @@ the fix, and committing it — all on a dedicated branch with a PR at the end.
 - User wants all code quality issues fixed automatically
 - User wants a clean branch with atomic, traceable fix commits
 - User wants a PR that resolves audit findings
-- Used after `audit-to-plan` has already produced a `FIX_PLAN.md`, or to run the full pipeline
+- Used after `audit-to-plan` has already produced a `docs/FIX_PLAN.md`, or to run the full pipeline
 
 ## Arguments
 
 | Argument | Default | Meaning |
 |----------|---------|---------|
 | `--scope diff\|full` | `full` | Scope passed to `audit-to-plan` when running a fresh audit |
-| `--plan <path>` | _(run fresh audit)_ | Use an existing `FIX_PLAN.md` instead of re-auditing |
+| `--plan <path>` | _(run fresh audit)_ | Use an existing `docs/FIX_PLAN.md` instead of re-auditing |
 | `--threshold <N>` | `95` | Stop when ≥N% of issues are resolved (0–100) |
-| `--output <path>` | `FIX_PLAN.md` | Output path for the fix plan (when running a fresh audit) |
+| `--output <path>` | `docs/FIX_PLAN.md` | Output path for the fix plan (when running a fresh audit) |
 
 ## Model Guidance
 
@@ -58,9 +58,9 @@ Use today's date in `YYYYMMDD` format (UTC).
 
 ### 3. Audit (if no `--plan` provided)
 
-Run `audit-to-plan --scope full --output FIX_PLAN.md` (or use the `--scope` argument if provided).
+Run `audit-to-plan --scope full --output docs/FIX_PLAN.md` (or use the `--scope` argument if provided).
 
-Load the resulting `FIX_PLAN.md`:
+Load the resulting `docs/FIX_PLAN.md`:
 - Parse all issues, extract `ISSUE-NNN`, severity, file, status
 - Record `total_issues` = count of all issues with status `open`
 
@@ -107,7 +107,7 @@ If verification fails: undo the change, increment the retry counter for this iss
 
 #### 4e. Commit or retry
 
-- **Verified:** commit the fix and mark the issue resolved in `FIX_PLAN.md`:
+- **Verified:** commit the fix and mark the issue resolved in `docs/FIX_PLAN.md`:
   ```
   git add <changed files>
   git commit -m "fix(ISSUE-NNN): <issue title in lowercase>"
@@ -130,7 +130,7 @@ If the threshold is met, exit the loop.
 
 ### 5. Finalize fix plan
 
-Update `FIX_PLAN.md` — append a completion section:
+Update `docs/FIX_PLAN.md` — append a completion section:
 
 ```markdown
 ---
@@ -152,7 +152,7 @@ Cleanliness: <resolved / (total - blocked) * 100>%
 
 Commit the updated plan:
 ```
-git commit -m "chore: update FIX_PLAN.md with quality-loop results"
+git commit -m "chore: update docs/FIX_PLAN.md with quality-loop results"
 ```
 
 ### 6. Push and open PR

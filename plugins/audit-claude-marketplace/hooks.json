@@ -2,6 +2,7 @@
   "PostToolUse": [
     {
       "matcher": "Write",
+      "filePattern": "docs/FIX_PLAN.md",
       "hooks": [
         {
           "type": "command",
@@ -11,7 +12,8 @@
           ]
         }
       ],
-      "description": "Suggest quality-loop when FIX_PLAN.md is written by audit-to-plan skill",
+      "description": "Suggest quality-loop when FIX_PLAN.md is written (by audit-to-plan or other tools). The hook script still verifies presence of FIX_PLAN in tool output before suggesting actions. Default now prefers docs/FIX_PLAN.md.",
+
       "id": "post:write:fix-plan-suggest-quality-loop"
     }
   ]

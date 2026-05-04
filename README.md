@@ -108,13 +108,13 @@ python3 scripts/validate-skills.py
 python3 scripts/fix_plan_parser.py --md tests/fixtures/sample_FIX_PLAN.md --json FIX_PLAN.json
 
 # Run the reference runner (dry-run by default)
-python3 scripts/quality_loop.py --plan tests/fixtures/sample_FIX_PLAN.md --dry-run
+python3 scripts/quality_loop.py --plan docs/FIX_PLAN.md --dry-run
 ```
 
 ### Suggested workflow (safe)
 
 1. Run `audit-to-plan` with `--scope diff` to collect issues.
-2. Inspect `FIX_PLAN.md` (and `FIX_PLAN.json` if you generated it).
+2. Inspect `docs/FIX_PLAN.md` (and `FIX_PLAN.json` if you generated it).
 3. Run `quality-loop` with `--dry-run` to preview commits.
 4. When comfortable, run with `--apply` and `--no-push` to create commits locally, then push and open a PR.
 

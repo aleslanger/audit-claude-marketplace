@@ -23,7 +23,7 @@ markdown fix-plan file. Each finding gets a unique `ISSUE-NNN` ID for tracking b
 |----------|---------|---------|
 | `--scope diff` | ✓ default | Only files changed vs HEAD |
 | `--scope full` | | Entire tracked codebase |
-| `--output <path>` | `FIX_PLAN.md` | Output file path |
+| `--output <path>` | `docs/FIX_PLAN.md` | Output file path |
 
 ## Model Guidance
 
@@ -113,7 +113,7 @@ CRITICAL first).
 
 ### 5. Write plan file
 
-Output path: `--output` arg or `FIX_PLAN.md` in project root.
+Output path: `--output` arg or `docs/FIX_PLAN.md` in project root.
 
 **Every issue MUST include a file path and line number. Issues without line numbers are not actionable.**
 
@@ -190,13 +190,13 @@ Total issues: <N> (CRITICAL: X · HIGH: Y · MEDIUM: Z · LOW: W)
 ### Next steps (how to run quality-loop)
 
 - Local (recommended):
-  - Preview (dry-run): `python3 scripts/quality_loop.py --plan FIX_PLAN.md --dry-run`
-  - Apply commits locally (no push): `python3 scripts/quality_loop.py --plan FIX_PLAN.md --apply --no-push`
+  - Preview (dry-run): `python3 scripts/quality_loop.py --plan docs/FIX_PLAN.md --dry-run`
+  - Apply commits locally (no push): `python3 scripts/quality_loop.py --plan docs/FIX_PLAN.md --apply --no-push`
   - Push branch and open PR: `git push origin fix/YYYYMMDD-quality-loop` then open a PR via the GitHub UI or `gh pr create`
 
 - From a client (Claude / Copilot / Gemini):
   - Some clients use `/skills` instead of `/skill`. If `/skill` fails, run `/skills` to list available commands.
-  - Then run the workflow command shown by your client, for example: `/skills quality-loop --plan FIX_PLAN.md --dry-run`
+  - Then run the workflow command shown by your client, for example: `/skills quality-loop --plan docs/FIX_PLAN.md --dry-run`
 
 Notes:
 - Always run `--dry-run` first and inspect generated commits before pushing.

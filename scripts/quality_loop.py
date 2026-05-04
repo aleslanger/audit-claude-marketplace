@@ -87,7 +87,7 @@ def simulate_run(plan_path: str, threshold: int = 95, dry_run: bool = True, appl
 
 def main():
     parser = argparse.ArgumentParser(description='Reference quality-loop runner (dry-run by default)')
-    parser.add_argument('--plan', default='FIX_PLAN.md', help='Path to FIX_PLAN.md or FIX_PLAN.json')
+    parser.add_argument('--plan', default='docs/FIX_PLAN.md', help='Path to FIX_PLAN.md or FIX_PLAN.json')
     parser.add_argument('--threshold', type=int, default=95, help='Threshold percent to stop at')
     parser.add_argument('--dry-run', action='store_true', default=True, help='Do not modify files or commit')
     parser.add_argument('--apply', action='store_true', default=False, help='Enable apply-mode (potentially make commits)')
