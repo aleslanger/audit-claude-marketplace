@@ -159,8 +159,30 @@ and quote the decisive lines; (2) a test exercising the path, and what it
 asserts; (3) a caller proving the code is reachable; (4) static reasoning about
 code shape — weakest, and labelled as such.
 
-`PARTIAL` and `BROKEN` require a `file:line` pointer. `UNCLEAR` must state what
-would resolve it.
+Every evidence record states **what it proves**, which is usually narrower than
+the claim it is cited for: one passing cross-tenant test proves that one case,
+not that isolation holds everywhere. Documentation is never evidence of
+behavior — a README describes intent, so `CONFIRMED` requires code or runtime.
+
+`PARTIAL` and `BROKEN` require a `file:line` pointer. `CANNOT VERIFY` must state
+what would resolve it.
+
+Findings carry both **severity** (how bad the defect is) and **priority** (when
+it gets fixed). They are distinct: schedule pressure may move priority, never
+severity. Full definitions, the fingerprint rule, and coverage arithmetic live in
+`references/finding-model.md`.
+
+Four rules that follow from it, and that an audit fails without:
+
+- **Enumerate items, not counts.** Phase 1 produces an inventory manifest — the
+  items and how they were found. A coverage denominator nobody can check is a
+  claim about your own thoroughness.
+- **Every discovered item ends reviewed, excluded, or explicitly not reviewed.**
+  There is no fourth state; an unaccounted item reads as fine.
+- **A finding that vanished is not a finding that was fixed** — unless its
+  location was re-reviewed. Otherwise it is `CANNOT VERIFY`.
+- **Stay inside what the audit was authorized to read.** Citing a file proves you
+  opened it, so evidence locations are part of that boundary.
 
 **A finding you delegated is evidence level 4 until you verify it yourself.** A
 subagent's confident `file:line` citation still rests on which files it chose to
@@ -213,11 +235,42 @@ patterns; work it during Phase 2 rather than trusting the component's source.
 - **Recommendations without trade-offs** — architectural proposals state cost,
   not only benefit.
 
+## Step 5 — Post-implementation review, when the audit produced changes
+
+An audit itself changes nothing (Rule 1), so this step does not apply to a
+plain audit. It applies when the user subsequently asked for the fixes, or when
+the skill's own tooling was modified — anything that produced a diff.
+
+**Implementation is not done when it appears to work.** Run a separate review
+pass over the **final diff**, not over the changes as they were written. Where
+the environment offers an independent reviewer agent, prefer someone who did not
+write the code — but a review finding is a claim, not a verdict: verify each
+significant one against the actual diff before acting on it.
+
+The full protocol — diff review, cross-file consistency, invariant re-check,
+adversarial pass, backward compatibility, round-trip and negative validation,
+and the final gate — is in `references/post-implementation-review.md`.
+
+Two rules from it that are routinely skipped and must not be:
+
+- **Never report a test as passing without running it.** State the real result.
+- **Never claim `VALIDATED` when a blocking gate did not run.** Use
+  `CANNOT VERIFY` and name what is missing.
+
 ## Reference files
 
 - `references/plan-template.md` — plan structure and tooling table
 - `references/audit-phases.md` — what each phase examines
+- `references/finding-model.md` — canonical finding model: IDs, fingerprints,
+  evidence, severity vs priority, coverage, threat-model activation
+- `references/audit-schema.md` — `AUDIT.json` schema, validation rules, and the
+  `FIX_PLAN` compatibility bridge
 - `references/report-template.md` — report structure and capability matrix
 - `references/security-checklist.md` — full security checklist
 - `references/edge-cases.md` — edge cases and what to look for in code
 - `references/test-plan.md` — test plan and pre-production checklist
+- `references/post-implementation-review.md` — review protocol for changes made
+  after an audit
+
+Reference implementation: `scripts/audit_schema.py` validates an `AUDIT.json`
+and projects it to `FIX_PLAN.md` for `quality-loop`.

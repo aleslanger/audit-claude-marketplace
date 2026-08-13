@@ -70,8 +70,10 @@ the domain — they are CRUD-shaped examples, not a fixed list:
 
 ### Regression tests
 
-- One test per fixed finding, named after the finding ID (`F-01`), asserting the
-  specific broken behavior no longer occurs.
+- One test per fixed finding, named after the finding ID (`ISSUE-001`), asserting
+  the specific broken behavior no longer occurs. Prefer naming by `fingerprint`
+  where the test must survive renumbering between audits — `id` is positional and
+  changes whenever the finding set does.
 - Snapshot of the capability matrix as an executable checklist where feasible.
 
 ## Pre-production checklist

@@ -43,6 +43,20 @@ Use the literal marker `CANNOT VERIFY`.
 State what was audited and what was deliberately left out. Then list every
 discovered section and its purpose.
 
+State coverage as a fraction derived from the Phase 1 inventory, never as an
+impression, with static and runtime reported **separately** — reading every
+route is not running any of them:
+
+| Mode | Discovered | Excluded | Reviewed | Coverage |
+|---|---|---|---|---|
+| Static | | | | `FULL` / `PARTIAL` / `SAMPLED` |
+| Runtime | | | | |
+
+`FULL` requires `reviewed == discovered - excluded` for that mode. Nine of ten
+reviewed is `PARTIAL`, however unimportant the tenth looked. Every exclusion is
+listed with its reason and counted — never silently dropped. A `SAMPLED` mode
+states its selection method and claims nothing about unsampled items.
+
 | Section | Route / entry point | Entities | Purpose | Backing endpoints / actions |
 |---|---|---|---|---|
 
@@ -65,22 +79,40 @@ missing or broken.
 
 ## 5. Findings
 
-One block per finding, ordered by priority.
+One block per finding, ordered by priority. Fields are defined in
+`finding-model.md`; the same data serializes to `AUDIT.json` per
+`audit-schema.md`.
 
 ```
-### F-01 — <short title>
+### ISSUE-001 — <short title>
 
+- **Fingerprint:** `a3f2c1d4e5b6`
 - **Location:** path/to/file.ts:123
 - **Problem:** what is wrong
-- **Evidence:** quoted code or trace showing it
-- **Type:** bug | missing feature | UX | architecture | security
+- **Evidence:**
+  - `code-read` path/to/file.ts:123 — "<quoted lines>"
+    proves: <what exactly this establishes>
+- **Category:** security | bug | missing-feature | architecture | ux | data-integrity | performance | consistency
 - **Impact:** what goes wrong for a user or the data
-- **Likelihood:** how often this is hit in practice
+- **Severity:** CRITICAL | HIGH | MEDIUM | LOW
+- **Likelihood:** CERTAIN | LIKELY | OCCASIONAL | RARE
 - **Priority:** P0 | P1 | P2 | P3
+- **Confidence:** CONFIRMED | PROBABLE | INFERRED
 - **Size:** S | M | L
-- **Depends on:** F-xx, or none
+- **Depends on:** ISSUE-NNN, or none
 - **Proposed fix:** what to change and WHY that is the right change
 ```
+
+`ISSUE-NNN` is the canonical finding ID. The `F-01` format is **legacy**: it may
+be read in existing documents but never written. Conversion is positional —
+`F-01` → `ISSUE-001`.
+
+Severity and priority are both required and are not interchangeable. Severity
+describes the defect; priority describes the schedule. Deprioritizing never
+rewrites severity — state `priority_override_reason` instead.
+
+A `CANNOT VERIFY` finding additionally carries **blocked_by** and
+**resolves_when**. Without them it is invalid output.
 
 ## 6. Security findings
 

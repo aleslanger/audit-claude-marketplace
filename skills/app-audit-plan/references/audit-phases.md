@@ -22,6 +22,16 @@ Before concluding a directory is empty: check for symlinks, nested workspaces,
 and ignore rules. A file search that follows neither will report zero files for
 a full application.
 
+Record the enumeration as an **inventory manifest** — the items themselves, the
+method used, and the command if there was one. A count alone cannot be checked
+by anyone, including you; a list makes the coverage denominator verifiable and
+lets a later audit re-run the same enumeration and diff it. See
+`finding-model.md` §5.
+
+Every discovered item must end in exactly one state — reviewed, excluded, or
+explicitly `not_reviewed`. There is no fourth state: an item accounted for
+nowhere reads as fine to every later reader.
+
 For each section record: purpose, entities involved, operations exposed in the
 UI (or in the public contract, for an API), operations existing in the backend,
 operations that plausibly belong given the entity's nature.
@@ -130,6 +140,13 @@ Each finding carries impact, likelihood, size `S`/`M`/`L`, dependencies.
 
 When findings arrive from parallel work, de-duplicate before prioritizing —
 the same root cause often surfaces in several modules and should be ranked once.
+
+When a previous audit exists, classify every earlier finding rather than only
+listing current ones: `STILL_OPEN`, `REGRESSED`, `FIXED`, `DISAPPEARED`, `NEW`
+(`finding-model.md` §5a). A finding missing from this audit counts as `FIXED`
+only if its location was actually re-reviewed; otherwise it is `DISAPPEARED` and
+resolves to `CANNOT VERIFY`. Treating the second as the first is how a series of
+audits comes to overstate progress.
 
 ## Phase 9 — Report
 
