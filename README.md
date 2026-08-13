@@ -22,6 +22,22 @@ Invoke a skill from a Claude Code or Copilot CLI client:
 For clients without a plugin system, load `skills/<skill>/SKILL.md` as the prompt prefix — see
 [Codex / generic LLM wrappers](#codex--generic-llm-wrappers).
 
+### Finding model
+
+`app-audit-plan` and `audit-to-plan` share one canonical finding model: findings
+are identified by a positional `ISSUE-NNN` id plus a `fingerprint` that stays
+stable across audits, and every non-`OK` finding carries evidence stating what it
+proves. `AUDIT.json` (machine-readable) and `AUDIT.md` (human) are generated from
+the same model, and `AUDIT.json` projects onto the `FIX_PLAN.md` that
+`quality-loop` already consumes.
+
+- [`finding-model.md`](skills/app-audit-plan/references/finding-model.md) — IDs,
+  fingerprints, evidence, severity vs priority, coverage
+- [`audit-schema.md`](skills/app-audit-plan/references/audit-schema.md) —
+  `AUDIT.json` schema, validation rules, `FIX_PLAN` bridge
+
+The `F-01` finding format is **legacy**: it may be read, never written.
+
 ### Suggested workflow
 
 1. Run `audit-to-plan` with `--scope diff` to collect issues.
@@ -121,6 +137,12 @@ python3 scripts/audit_to_plan.py --scope diff --write-json
 
 # Convert an existing FIX_PLAN.md to JSON
 python3 scripts/fix_plan_parser.py --md tests/fixtures/sample_FIX_PLAN.md --json FIX_PLAN.json
+
+# Validate an AUDIT.json against the canonical finding model
+python3 scripts/audit_schema.py tests/fixtures/sample_AUDIT.json
+
+# Project an AUDIT.json onto a FIX_PLAN.md for quality-loop
+python3 scripts/audit_schema.py tests/fixtures/sample_AUDIT.json --fix-plan docs/FIX_PLAN.md
 
 # Run the reference runner (dry-run by default)
 python3 scripts/quality_loop.py --plan docs/FIX_PLAN.md --dry-run
