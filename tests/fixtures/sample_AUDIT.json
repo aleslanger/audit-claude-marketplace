@@ -1,0 +1,264 @@
+{
+  "schema_version": "1.0",
+  "generated": "2026-08-13T10:00:00",
+  "scope": "admin area — apps/admin only (monorepo also contains apps/storefront)",
+  "authorized_scope": ["apps/admin/"],
+  "inventory": {
+    "static": {
+      "items": [
+        "apps/admin/orders",
+        "apps/admin/export",
+        "apps/admin/refunds",
+        "apps/admin/bulk-archive",
+        "apps/admin/permissions",
+        "apps/admin/payments",
+        "apps/admin/orders-list",
+        "apps/admin/reports",
+        "apps/storefront/",
+        "apps/admin/legacy/"
+      ],
+      "method": "next router config + glob apps/admin/src/app/**/page.tsx, plus api route handlers",
+      "command": "rg -l 'export (default|async function (GET|POST|DELETE))' apps --glob '*.ts*'"
+    },
+    "runtime": { "same_as": "static" }
+  },
+  "coverage": {
+    "static": {
+      "mode": "PARTIAL",
+      "discovered": 10,
+      "excluded": 2,
+      "reviewed": 7,
+      "reviewed_items": [
+        "apps/admin/orders",
+        "apps/admin/export",
+        "apps/admin/refunds",
+        "apps/admin/bulk-archive",
+        "apps/admin/permissions",
+        "apps/admin/payments",
+        "apps/admin/orders-list"
+      ],
+      "not_reviewed": ["apps/admin/reports"]
+    },
+    "runtime": {
+      "mode": "SAMPLED",
+      "discovered": 10,
+      "excluded": 2,
+      "reviewed": 3,
+      "reviewed_items": [
+        "apps/admin/orders",
+        "apps/admin/export",
+        "apps/admin/refunds"
+      ],
+      "not_reviewed": [
+        "apps/admin/bulk-archive",
+        "apps/admin/permissions",
+        "apps/admin/payments",
+        "apps/admin/orders-list",
+        "apps/admin/reports"
+      ],
+      "selection_method": "the three destructive endpoints, exercised against a seeded database"
+    }
+  },
+  "excluded": [
+    {
+      "item": "apps/storefront/",
+      "reason": "separate application, out of the requested scope"
+    },
+    {
+      "item": "apps/admin/legacy/",
+      "reason": "removal scheduled for 2026-09, confirmed unrouted"
+    }
+  ],
+  "findings": [
+    {
+      "id": "ISSUE-001",
+      "fingerprint": "d41f8a2b7c93",
+      "title": "IDOR: order detail endpoint trusts the client-supplied id",
+      "category": "security",
+      "severity": "CRITICAL",
+      "likelihood": "LIKELY",
+      "priority": "P0",
+      "status": "BROKEN",
+      "confidence": "CONFIRMED",
+      "location": "apps/admin/src/api/orders/[id]/route.ts:18",
+      "evidence": [
+        {
+          "kind": "code-read",
+          "location": "apps/admin/src/api/orders/[id]/route.ts:18",
+          "quote": "const order = await db.order.findUnique({ where: { id: params.id } })",
+          "proves": "the query filters by id alone, with no owner or tenant predicate",
+          "commit": "4f2a9c1e8b73"
+        },
+        {
+          "kind": "runtime-observation",
+          "location": "apps/admin/src/api/orders/[id]/route.ts:18",
+          "quote": "GET /api/orders/9f21 as tenant A returned tenant B's order",
+          "proves": "one cross-tenant read succeeded; it does not establish that every route is affected"
+        }
+      ],
+      "impact": "any authenticated operator can read any tenant's order by guessing or enumerating an id",
+      "proposed_fix": "add the caller's tenant to the where clause and assert ownership server-side",
+      "size": "S"
+    },
+    {
+      "id": "ISSUE-002",
+      "fingerprint": "b7e3c9d1a428",
+      "title": "Cross-tenant leak: export endpoint ignores the tenant filter",
+      "category": "security",
+      "severity": "CRITICAL",
+      "likelihood": "OCCASIONAL",
+      "priority": "P0",
+      "status": "BROKEN",
+      "confidence": "CONFIRMED",
+      "location": "apps/admin/src/api/export/route.ts:44",
+      "evidence": [
+        {
+          "kind": "code-read",
+          "location": "apps/admin/src/api/export/route.ts:44",
+          "quote": "const rows = await db.invoice.findMany({ where: { createdAt: { gte: from } } })",
+          "proves": "the export query constrains by date only, with no tenant predicate"
+        }
+      ],
+      "impact": "an export run by any operator includes every tenant's invoices",
+      "proposed_fix": "scope the query to the caller's tenant and authorize per record set",
+      "size": "S",
+      "depends_on": ["ISSUE-001"]
+    },
+    {
+      "id": "ISSUE-003",
+      "fingerprint": "9c02e5f4b6d7",
+      "title": "Duplicate mutation: refund has neither idempotency key nor server-side guard",
+      "category": "data-integrity",
+      "severity": "HIGH",
+      "likelihood": "LIKELY",
+      "priority": "P1",
+      "status": "BROKEN",
+      "confidence": "CONFIRMED",
+      "location": "apps/admin/src/api/refunds/route.ts:27",
+      "evidence": [
+        {
+          "kind": "code-read",
+          "location": "apps/admin/src/api/refunds/route.ts:27",
+          "quote": "await payments.refund(order.paymentId, amount)",
+          "proves": "the handler calls refund with no idempotency key and no prior-refund check"
+        },
+        {
+          "kind": "caller-trace",
+          "location": "apps/admin/src/components/RefundButton.tsx:31",
+          "quote": "<button onClick={submitRefund}>",
+          "proves": "the only guard is a disabled button in the client, which a retry bypasses"
+        }
+      ],
+      "impact": "a retried or double-clicked refund charges the merchant twice",
+      "proposed_fix": "pass an idempotency key and reject a second refund for the same payment server-side",
+      "size": "M"
+    },
+    {
+      "id": "ISSUE-004",
+      "fingerprint": "3a8b1c7e0f52",
+      "title": "Dead control: bulk archive button is routed to no handler",
+      "category": "bug",
+      "severity": "MEDIUM",
+      "likelihood": "CERTAIN",
+      "priority": "P1",
+      "status": "BROKEN",
+      "confidence": "CONFIRMED",
+      "location": "apps/admin/src/components/BulkArchive.tsx:12",
+      "evidence": [
+        {
+          "kind": "code-read",
+          "location": "apps/admin/src/components/BulkArchive.tsx:12",
+          "quote": "onClick={() => setPending(true)}",
+          "proves": "the handler sets local state and issues no request"
+        },
+        {
+          "kind": "caller-trace",
+          "location": "apps/admin/src/api",
+          "quote": "no route matching /archive exists under the api directory",
+          "proves": "no backend endpoint backs the control"
+        }
+      ],
+      "impact": "the operator sees a spinner and believes records were archived; nothing is persisted",
+      "proposed_fix": "implement the archive endpoint, or remove the control until it exists",
+      "size": "M"
+    },
+    {
+      "id": "ISSUE-005",
+      "fingerprint": "6f4d2a9c8e13",
+      "title": "Permission code checked in the guard but never seeded",
+      "category": "bug",
+      "severity": "MEDIUM",
+      "likelihood": "CERTAIN",
+      "priority": "P1",
+      "status": "BROKEN",
+      "confidence": "CONFIRMED",
+      "location": "apps/admin/src/guards/permissions.ts:8",
+      "evidence": [
+        {
+          "kind": "code-read",
+          "location": "apps/admin/src/guards/permissions.ts:8",
+          "quote": "requirePermission('reports.export')",
+          "proves": "the guard requires the code reports.export"
+        },
+        {
+          "kind": "code-read",
+          "location": "apps/admin/prisma/seed.ts:44",
+          "quote": "permissions: ['reports.view', 'orders.manage']",
+          "proves": "reports.export is absent from the seed, so no role can hold it"
+        }
+      ],
+      "impact": "report export is permanently unreachable for every non-superuser",
+      "proposed_fix": "seed the permission code and grant it to the roles that should hold it",
+      "size": "S"
+    },
+    {
+      "id": "ISSUE-006",
+      "fingerprint": "e21b7f3d5a94",
+      "title": "External payment provider behavior under timeout is not determinable here",
+      "category": "data-integrity",
+      "severity": "HIGH",
+      "likelihood": "OCCASIONAL",
+      "priority": "P1",
+      "status": "CANNOT VERIFY",
+      "confidence": "INFERRED",
+      "location": "apps/admin/src/lib/payments.ts:63",
+      "evidence": [
+        {
+          "kind": "static-reasoning",
+          "location": "apps/admin/src/lib/payments.ts:63",
+          "quote": "const res = await fetch(PROVIDER_URL, { method: 'POST', body })",
+          "proves": "no timeout or retry policy is set in this call; the provider's own behavior is not visible from the code"
+        }
+      ],
+      "impact": "if the provider retries internally, a refund may apply twice — unknown without provider access",
+      "blocked_by": "external service — no sandbox credentials in this environment",
+      "resolves_when": "replay a timed-out refund against the provider sandbox and inspect whether it retries",
+      "proposed_fix": "pending verification; see ISSUE-003 for the idempotency key that would make it safe either way",
+      "size": "M",
+      "depends_on": ["ISSUE-003"]
+    },
+    {
+      "id": "ISSUE-007",
+      "fingerprint": "7d5c3e1a9b40",
+      "title": "Filters reset when returning from detail to list",
+      "category": "ux",
+      "severity": "LOW",
+      "likelihood": "CERTAIN",
+      "priority": "P2",
+      "status": "PARTIAL",
+      "confidence": "CONFIRMED",
+      "location": "apps/admin/src/app/orders/page.tsx:21",
+      "evidence": [
+        {
+          "kind": "code-read",
+          "location": "apps/admin/src/app/orders/page.tsx:21",
+          "quote": "const [filters, setFilters] = useState(DEFAULT_FILTERS)",
+          "proves": "filter state is component-local and absent from the URL, so it cannot survive navigation"
+        }
+      ],
+      "impact": "an operator working a filtered queue loses their place on every return from a detail page",
+      "proposed_fix": "hold filter, sort, and page in the URL query string",
+      "size": "S"
+    }
+  ]
+}
