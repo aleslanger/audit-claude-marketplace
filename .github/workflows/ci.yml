@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
 
 jobs:
@@ -16,6 +16,8 @@ jobs:
           python-version: "3.12"
       - name: Validate skill manifests
         run: python3 scripts/validate-skills.py
+      - name: Validate canonical audit schema
+        run: python3 scripts/audit_schema.py tests/fixtures/sample_AUDIT.json
       - name: Install test deps
         run: python3 -m pip install --upgrade pip && python3 -m pip install pytest
       - name: Run tests
