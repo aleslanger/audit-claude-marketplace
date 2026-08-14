@@ -2,16 +2,21 @@
   "name": "audit-claude-marketplace",
   "display_name": "Audit claude marketplace",
   "description": "A curated collection of Claude Code skills",
-  "version": "0.1.0",
-  "owner": { "name": "aleslanger", "displayName": "Aleš Langer" },
+  "version": "0.2.0",
+  "owner": {
+    "name": "aleslanger",
+    "displayName": "Aleš Langer"
+  },
   "license": "MIT",
   "plugins": [
     {
       "name": "audit-claude-marketplace",
       "source": "./",
       "description": "A curated collection of Claude Code skills",
-      "version": "0.1.0",
-      "author": { "name": "Aleš Langer" },
+      "version": "0.2.0",
+      "author": {
+        "name": "Aleš Langer"
+      },
       "skillsDir": "skills/"
     }
   ],

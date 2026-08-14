@@ -1,8 +1,15 @@
 {
   "name": "Audit claude marketplace",
   "description": "A curated collection of skills for Copilot CLI and other clients",
-  "version": "0.1.0",
-  "author": { "name": "Aleš Langer" },
+  "version": "0.2.0",
+  "author": {
+    "name": "Aleš Langer"
+  },
   "license": "MIT",
-  "keywords": ["skills", "audit", "code-review", "workflows"]
+  "keywords": [
+    "skills",
+    "audit",
+    "code-review",
+    "workflows"
+  ]
 }

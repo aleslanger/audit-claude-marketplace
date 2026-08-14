@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-HOOK = "plugins/audit-claude-marketplace/scripts/hooks/fix-plan-suggest-quality-loop.sh"
+HOOK = "scripts/hooks/fix-plan-suggest-quality-loop.sh"
 
 
 def run_hook(input_text: str) -> str:
