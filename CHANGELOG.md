@@ -43,6 +43,13 @@ are not reconstructed here.
 - `app-audit-plan` findings use `ISSUE-NNN` instead of `F-01`. The `F-01` format is
   legacy — readable, never written; conversion is positional.
 - Report template gained a coverage table reporting static and runtime separately.
+- Removed `plugins/audit-claude-marketplace/`, a second copy of `audit-to-plan`
+  and `quality-loop` that stopped being updated in May while `skills/` moved on.
+  The hook and `hooks.json` lived only there and moved to `scripts/hooks/` and the
+  repository root, where the rest of the tooling already expected them.
+- `skills/quality-loop/SKILL.md` documents `docs/FIX_PLAN.md`, matching what both
+  scripts already default to.
+- Plugin and marketplace manifests all report the same version.
 
 ### Fixed
 - CI `push` trigger ran on `main`, which does not exist in this repository, so it
