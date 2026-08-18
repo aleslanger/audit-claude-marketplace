@@ -62,8 +62,14 @@ states its selection method and claims nothing about unsampled items.
 
 ## 4. Capability matrix
 
-One row per section. Values: `OK` / `MISSING` / `PARTIAL` / `BROKEN` /
-`UNCLEAR`.
+One row per section. Values are the `status` enum from `finding-model.md` §3:
+`OK` / `PARTIAL` / `BROKEN` / `MISSING` / `CANNOT VERIFY`. The matrix uses no
+values of its own — a cell that cannot be serialized into `AUDIT.json` is a cell
+no consumer can read.
+
+A cell nobody could trace is `CANNOT VERIFY`, which carries `blocked_by` and
+`resolves_when` like any other. That requirement is the point: "unclear" with no
+resolution condition is indistinguishable from "not looked at".
 
 Adapt the columns to the domain. The CRUD-shaped default:
 
@@ -113,6 +119,12 @@ rewrites severity — state `priority_override_reason` instead.
 
 A `CANNOT VERIFY` finding additionally carries **blocked_by** and
 **resolves_when**. Without them it is invalid output.
+
+The `FIX_PLAN` projection is a **subset** of this list, not a copy of it:
+`status: OK` and `CANNOT VERIFY` findings are excluded, because neither names a
+fix to apply (`audit-schema.md`). So the report is the complete record, and a
+finding absent from the fix plan is not a finding that went away — `CANNOT
+VERIFY` items are tracked here, by their `resolves_when`.
 
 ## 6. Security findings
 

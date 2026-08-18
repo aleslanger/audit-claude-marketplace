@@ -1,6 +1,6 @@
 ---
 name: app-audit-plan
-description: Use when asked to audit an application or any part of it, review whether its screens and features are actually functional, check for missing CRUD or admin operations, dead buttons and placeholders, or assess a codebase before production. Also use when planning such an audit before executing it.
+description: Use when asked to audit an application or any part of it, review whether its screens and features are actually functional, check for missing CRUD or admin operations, dead buttons and placeholders, or assess a codebase before production. Also use when planning such an audit before executing it, and when reviewing the diff of fixes made in response to an audit.
 ---
 
 # Application Audit Plan
@@ -114,6 +114,7 @@ not apply, and record that it was dropped and why.
 | # | Phase | Produces |
 |---|---|---|
 | 1 | Inventory | Complete list of routes, screens, components, endpoints, models, permissions, jobs |
+| 1b | Authorization sweep | For every mutating endpoint: is there a server-side check at all |
 | 2 | Functional verification | Capability matrix + edge-case results, evidence-backed |
 | 3 | Architecture | Layering, duplication, consistency, data flow, performance findings |
 | 4 | Security | Authorization, input, sensitive data, destructive-operation findings |
@@ -126,6 +127,24 @@ not apply, and record that it was dropped and why.
 Phase detail — what each phase examines and the checklists it works
 through — lives in `references/audit-phases.md`, with supporting checklists in
 `references/security-checklist.md` and `references/edge-cases.md`.
+
+**Phase 1b runs before Phase 2, and it is deliberately shallow.** One pass over
+the mutating endpoints from the inventory, asking only whether a server-side
+authorization check exists — grep and read, not full tracing. Anything suspicious
+becomes a Phase 4 item; Phase 4 still runs the whole checklist in its usual slot.
+
+The reason it is pulled forward: Rule 5 says a missing server-side authorization
+check outranks everything else, and security is otherwise the fourth phase. An
+audit that runs out of time mid-execution — the client call is in two hours, and
+the capability matrix is half built — would have spent all of it on completeness
+work and produced zero authorization findings. The existing time-box guidance
+below covers a scope the *user* narrowed in advance; it does nothing for runway
+the auditor simply ran out of. This ordering makes the highest-severity finding
+class the cheapest thing to have already done.
+
+*Counter-argument considered:* "this duplicates Phase 4." It overlaps it by one
+question, on purpose. The sweep is minutes and finds the P0s; Phase 4 is where
+they get traced, evidenced, and joined by everything else.
 
 Where the environment offers parallelism (subagents, worktrees), the plan says
 which phases fan out and which must be sequential. Inventory precedes
@@ -202,7 +221,7 @@ patterns; work it during Phase 2 rather than trusting the component's source.
 | Excuse | Reality |
 |---|---|
 | "The user is in a hurry, I'll skip the plan" | The plan is what prevents an audit of whatever happened to be read first. It costs minutes. |
-| "Component exists, so the feature works" | Rule 2. Trace it or mark it `UNCLEAR`. |
+| "Component exists, so the feature works" | Rule 2. Trace it, or mark it `CANNOT VERIFY` with what would settle it. |
 | "Senior team / prior review, so it is probably fine" | Prior review is not evidence about this code. Audit it or say you did not. |
 | "This is obviously fine, no need to check" | Then quoting the two lines that prove it costs nothing. |
 | "I'll note the tools I usually use" | Tools differ per environment. Verify each one exists in this session first. |
@@ -226,8 +245,8 @@ patterns; work it during Phase 2 rather than trusting the component's source.
 
 - **Plan with no tooling section** — the plan then says nothing the user could
   not have guessed.
-- **Inventory by memory** — enumerate from the filesystem and router config,
-  not from what got read along the way.
+- **Inventory by memory** — enumerate from the codebase in the unit named for
+  this target, not from what got read along the way.
 - **Matrix without notes** — every non-`OK` cell needs a sentence saying what
   exactly is missing.
 - **Security findings mixed into UX findings** — they are separately ranked for

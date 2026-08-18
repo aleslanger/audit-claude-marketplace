@@ -308,6 +308,24 @@ Every one ends as `RESOLVED`, `ACCEPTED_WITH_REASON`, or `CANNOT_VERIFY`.
 `ACCEPTED_WITH_REASON` is never a way to make tests pass, and a Critical or High
 finding cannot hold that status without an explicit technical justification.
 
+**`RV-NNN` is a review-local counter, not a canonical finding ID.** It lives in
+the review write-up for the duration of one review pass; it is deliberately
+absent from `finding-model.md`, from the `AUDIT.json` schema, and from
+`validate_document`, and there is no validator for it.
+
+*Counter-argument considered:* "an ID format with no validation is an
+oversight — give `RV` a schema like `ISSUE-NNN` has." It is not. `ISSUE-NNN`
+identifies a defect **in the audited application**, which outlives the audit and
+therefore needs a fingerprint, evidence, and a wire format. `RV-NNN` identifies a
+comment **about a diff**, and is closed within the same pass that opened it —
+nothing consumes it afterwards. Giving it a schema would create a second
+finding-identity space for consumers to reconcile, which §2 exists to prevent.
+
+A review finding that *does* outlive the review — a real defect the diff
+introduced and nobody fixed — does not stay an `RV`. Promote it to a canonical
+`ISSUE-NNN` finding with a fingerprint and evidence, and say in the review
+write-up which `RV` became which `ISSUE`.
+
 ## 14. Definition of Done
 
 In addition to the normal criteria:

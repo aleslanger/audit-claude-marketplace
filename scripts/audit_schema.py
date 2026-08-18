@@ -11,13 +11,19 @@ every problem in one pass instead of one per run.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
+
+# Rules tightened in 1.1. A 1.0 document keeps the looser reading so existing
+# audits stay valid; crashes and immutability bugs are fixed for every version,
+# because a traceback is never the correct answer to bad input.
+TIGHTENED_SCHEMA_VERSION = "1.1"
 
 CATEGORIES = frozenset({
     "security", "bug", "missing-feature", "architecture",
@@ -32,6 +38,9 @@ EVIDENCE_KINDS = frozenset({
     "code-read", "test-run", "caller-trace", "static-reasoning", "runtime-observation",
 })
 COVERAGE_MODES = frozenset({"FULL", "PARTIAL", "SAMPLED"})
+
+# Kinds asserting what the code says, and so answerable only by quoting it.
+QUOTE_REQUIRED_KINDS = frozenset({"code-read", "test-run"})
 
 # Only these establish behavior; static reasoning describes code shape.
 CONFIRMING_EVIDENCE_KINDS = frozenset({"code-read", "test-run", "runtime-observation"})
@@ -52,7 +61,15 @@ REQUIRED_FIELDS = (
 
 CANONICAL_ID_RE = re.compile(r"^ISSUE-\d{3,}$")
 LEGACY_ID_RE = re.compile(r"^F-(\d+)$", re.IGNORECASE)
+# Anchored on a non-empty path: ":42" is not a location, and it used to
+# normalize to "" — which prefix-matched every authorized_scope entry.
 LINE_SUFFIX_RE = re.compile(r":\d+$")
+LOCATED_LINE_RE = re.compile(r"^.+:\d+$")
+FINGERPRINT_RE = re.compile(r"^[0-9a-f]{12}$")
+
+# A location standing in for "nowhere" — permitted only where there is no code
+# to point at.
+NO_LOCATION = "-"
 
 PRIORITY_MATRIX = {
     ("CRITICAL", "CERTAIN"): "P0", ("CRITICAL", "LIKELY"): "P0",
@@ -92,6 +109,91 @@ def normalize_location(location: str) -> str:
     while normalized.startswith("./"):
         normalized = normalized[2:]
     return normalized.lstrip("/")
+
+
+def _version_tuple(version: Any) -> tuple:
+    """Parse a dotted version into comparable integers.
+
+    Compared numerically, not as strings: `"1.10" >= "1.9"` is False as text, so a
+    future 1.10 would silently fall back to the looser 1.0 reading. A gate whose
+    failure mode is "accept less" has to be the one thing that cannot drift.
+
+    An unparseable version sorts lowest, so garbage gets the permissive reading
+    rather than a crash — the enum and field rules still apply to the document.
+    """
+    parts = str(version or "").split(".")
+    numbers = []
+    for part in parts:
+        digits = "".join(c for c in part if c.isdigit())
+        if not digits:
+            break
+        numbers.append(int(digits))
+    return tuple(numbers)
+
+
+def is_tightened(document: Dict[str, Any]) -> bool:
+    """True when this document opts into the 1.1 rules.
+
+    The tightened rules reject output that 1.0 accepted, so an existing audit
+    must keep validating unchanged. Version-gating is what lets a stricter rule
+    ship without retroactively invalidating a report someone already delivered.
+    """
+    if not isinstance(document, dict):
+        return False
+    return _version_tuple(document.get("schema_version")) >= _version_tuple(
+        TIGHTENED_SCHEMA_VERSION)
+
+
+def _non_empty_str(value: Any) -> bool:
+    """True for a string carrying actual content.
+
+    Truthiness is not enough: `"  "` and `True` are both truthy, and both were
+    accepted where the spec says "non-empty". `True` in particular was a
+    one-token bypass of the priority-override rule.
+    """
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _is_count(value: Any) -> bool:
+    """True for a non-negative integer that is not a bool.
+
+    `isinstance(True, int)` is True in Python, so a bool satisfied every
+    coverage arithmetic check; a negative count satisfied them too.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _path_segments(path: str) -> List[str]:
+    """Split a normalized path, resolving `..` so traversal cannot escape.
+
+    Without this, `apps/admin/../../etc/passwd` compared as a string starting
+    with `apps/admin/` and counted as inside that scope.
+    """
+    resolved: List[str] = []
+    for segment in path.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if resolved:
+                resolved.pop()
+            continue
+        resolved.append(segment)
+    return resolved
+
+
+def location_within(location: str, prefix: str) -> bool:
+    """True when `location` is the prefix itself or sits beneath it.
+
+    Compared segment by segment, because a raw `startswith` puts
+    `apps/admin-secrets/` inside a scope of `apps/admin`. An out-of-scope
+    citation is a disclosure whether or not the finding is real, so this is a
+    confidentiality check, not a formatting one.
+    """
+    location_parts = _path_segments(normalize_location(location))
+    prefix_parts = _path_segments(normalize_location(prefix))
+    if not prefix_parts:
+        return False
+    return location_parts[:len(prefix_parts)] == prefix_parts
 
 
 def compute_fingerprint(category: str, location: str, rule: str) -> str:
@@ -184,7 +286,7 @@ def compare_audits(
 
 
 def decay_confidence(
-    finding: Dict[str, Any], current_commits: Dict[str, str]
+    finding: Dict[str, Any], current_commits: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
     """Lower `CONFIRMED` to `PROBABLE` when the cited code has changed since.
 
@@ -196,6 +298,11 @@ def decay_confidence(
     decayed — audits with no git context keep working unchanged.
     """
     if finding.get("confidence") != "CONFIRMED":
+        return finding
+
+    # No git context is the common case, not an error: nothing can be stale
+    # relative to an unknown revision.
+    if not current_commits:
         return finding
 
     stale_records = []
@@ -213,14 +320,16 @@ def decay_confidence(
     if not stale_records:
         return finding
 
-    path, recorded, current = stale_records[0]
-    decayed = dict(finding)
+    # A deep copy, because a shallow `dict()` shares the nested `evidence` list
+    # with the caller — mutating the result then mutated the input, which is
+    # exactly what "never mutates the input" promises it will not do.
+    decayed = copy.deepcopy(finding)
     decayed["confidence"] = "PROBABLE"
     decayed["needs_reverification"] = True
-    decayed["confidence_note"] = (
-        f"evidence recorded at {recorded} but {path} is now at {current}; "
-        "re-verify before relying on this finding"
-    )
+    decayed["confidence_note"] = "; ".join(
+        f"evidence recorded at {recorded} but {path} is now at {current}"
+        for path, recorded, current in stale_records
+    ) + "; re-verify before relying on this finding"
     return decayed
 
 
@@ -261,13 +370,19 @@ def _validate_enums(finding: Dict[str, Any], path: str) -> List[ValidationError]
     errors = []
     for field, allowed, code in checks:
         value = finding.get(field)
-        if value is not None and value not in allowed:
+        if value is None:
+            continue
+        # `value not in allowed` raises TypeError on a list or dict, which took
+        # the whole validator down instead of reporting one bad field.
+        if not isinstance(value, str) or value not in allowed:
             errors.append(ValidationError(
                 code, path, f"{field} has unknown value {value!r}"))
     return errors
 
 
-def _validate_evidence(finding: Dict[str, Any], path: str) -> List[ValidationError]:
+def _validate_evidence(
+    finding: Dict[str, Any], path: str, tightened: bool = False
+) -> List[ValidationError]:
     errors: List[ValidationError] = []
     status = finding.get("status")
     evidence = finding.get("evidence")
@@ -288,20 +403,34 @@ def _validate_evidence(finding: Dict[str, Any], path: str) -> List[ValidationErr
                 "INVALID_EVIDENCE", record_path, "evidence record must be an object"))
             continue
         kind = record.get("kind")
-        if kind not in EVIDENCE_KINDS:
+        # Membership on an unhashable value raises, so the type is checked first.
+        if not isinstance(kind, str) or kind not in EVIDENCE_KINDS:
             errors.append(ValidationError(
                 "INVALID_EVIDENCE_KIND", record_path, f"unknown evidence kind {kind!r}"))
         if not record.get("location"):
             errors.append(ValidationError(
                 "EVIDENCE_MISSING_LOCATION", record_path, "evidence needs a location"))
-        if not record.get("proves"):
+
+        proves = record.get("proves")
+        if not (_non_empty_str(proves) if tightened else bool(proves)):
             errors.append(ValidationError(
                 "EVIDENCE_MISSING_PROVES", record_path,
                 "evidence must state what it proves"))
 
+        # A quote is the artifact the whole evidence standard rests on: reading
+        # code and asserting what it does is checkable only against the lines
+        # themselves. Kinds that describe reachability or shape rather than
+        # content have nothing to quote, so they are exempt.
+        if (tightened and isinstance(kind, str) and kind in QUOTE_REQUIRED_KINDS
+                and not _non_empty_str(record.get("quote"))):
+            errors.append(ValidationError(
+                "EVIDENCE_MISSING_QUOTE", record_path,
+                f"evidence of kind {kind!r} must quote the decisive lines"))
+
     # Documentation and code shape never establish behavior.
     if finding.get("confidence") == "CONFIRMED":
-        kinds = {r.get("kind") for r in evidence if isinstance(r, dict)}
+        kinds = {r.get("kind") for r in evidence
+                 if isinstance(r, dict) and isinstance(r.get("kind"), str)}
         if not (kinds & CONFIRMING_EVIDENCE_KINDS):
             errors.append(ValidationError(
                 "UNSUPPORTED_CONFIRMED", path,
@@ -310,7 +439,9 @@ def _validate_evidence(finding: Dict[str, Any], path: str) -> List[ValidationErr
     return errors
 
 
-def _validate_finding(finding: Dict[str, Any], path: str) -> List[ValidationError]:
+def _validate_finding(
+    finding: Dict[str, Any], path: str, tightened: bool = False
+) -> List[ValidationError]:
     if not isinstance(finding, dict):
         return [ValidationError("INVALID_FINDING", path, "finding must be an object")]
 
@@ -331,6 +462,13 @@ def _validate_finding(finding: Dict[str, Any], path: str) -> List[ValidationErro
     if not fingerprint:
         errors.append(ValidationError(
             "MISSING_FINGERPRINT", path, "finding has no fingerprint"))
+    elif tightened and not FINGERPRINT_RE.match(str(fingerprint)):
+        # The spec has always said 12 hex chars. Only truthiness was checked, so
+        # `True` was a valid fingerprint — and `True == 1`, which silently
+        # aliased it with any integer fingerprint in the collision map.
+        errors.append(ValidationError(
+            "INVALID_FINGERPRINT", path,
+            f"fingerprint {fingerprint!r} must be 12 lowercase hex characters"))
 
     # `supersedes` carries identity across a rename, which the hash cannot do.
     # Superseding itself would assert the file both moved and did not.
@@ -346,8 +484,21 @@ def _validate_finding(finding: Dict[str, Any], path: str) -> List[ValidationErro
             errors.append(ValidationError(
                 "MISSING_FIELD", path, f"required field {field!r} is missing"))
 
+    if tightened:
+        title = finding.get("title")
+        if title is not None and not _non_empty_str(title):
+            errors.append(ValidationError(
+                "EMPTY_TITLE", path, "title must be a non-empty string"))
+        # A newline in a title closed the FIX_PLAN heading it was rendered into
+        # and let the remainder become fabricated issues. The renderer flattens
+        # it too; this rejects it at the source rather than relying on that.
+        elif isinstance(title, str) and "\n" in title:
+            errors.append(ValidationError(
+                "TITLE_NOT_ONE_LINE", path,
+                "title must be a single line: a newline forges FIX_PLAN headings"))
+
     errors.extend(_validate_enums(finding, path))
-    errors.extend(_validate_evidence(finding, path))
+    errors.extend(_validate_evidence(finding, path, tightened))
 
     status = finding.get("status")
 
@@ -362,23 +513,38 @@ def _validate_finding(finding: Dict[str, Any], path: str) -> List[ValidationErro
 
     # A defect that exists in code can be pointed at precisely.
     if status in LOCATION_LINE_REQUIRED:
-        if not LINE_SUFFIX_RE.search(str(finding.get("location", ""))):
+        location = str(finding.get("location", ""))
+        # `LINE_SUFFIX_RE` is unanchored, so ":42" satisfied it — and ":42"
+        # normalizes to "", which prefix-matched every authorized_scope entry.
+        pattern = LOCATED_LINE_RE if tightened else LINE_SUFFIX_RE
+        if not pattern.search(location):
             errors.append(ValidationError(
                 "LOCATION_NEEDS_LINE", path,
                 f"status {status} requires a file:line location"))
 
     # CANNOT VERIFY is permanent until someone does the named step.
     if status == "CANNOT VERIFY":
-        if not finding.get("blocked_by") or not finding.get("resolves_when"):
+        has_reason = (
+            (_non_empty_str(finding.get("blocked_by"))
+             and _non_empty_str(finding.get("resolves_when")))
+            if tightened else
+            bool(finding.get("blocked_by")) and bool(finding.get("resolves_when"))
+        )
+        if not has_reason:
             errors.append(ValidationError(
                 "CANNOT_VERIFY_NEEDS_RESOLUTION", path,
                 "CANNOT VERIFY requires blocked_by and resolves_when"))
 
     # Priority is derived; deviating from it is a decision that must be stated.
     severity, likelihood = finding.get("severity"), finding.get("likelihood")
-    expected = PRIORITY_MATRIX.get((severity, likelihood))
+    # A dict key lookup raises on an unhashable value; the enum rules have
+    # already reported it, so the matrix simply has nothing to say here.
+    expected = (PRIORITY_MATRIX.get((severity, likelihood))
+                if isinstance(severity, str) and isinstance(likelihood, str) else None)
     if expected and finding.get("priority") != expected:
-        if not finding.get("priority_override_reason"):
+        reason = finding.get("priority_override_reason")
+        stated = _non_empty_str(reason) if tightened else bool(reason)
+        if not stated:
             errors.append(ValidationError(
                 "PRIORITY_MISMATCH", path,
                 f"{severity}/{likelihood} implies {expected}, got "
@@ -386,7 +552,8 @@ def _validate_finding(finding: Dict[str, Any], path: str) -> List[ValidationErro
 
     # High-priority security claims need a demonstrated impact path.
     if finding.get("category") == "security" and finding.get("priority") in ("P0", "P1"):
-        if not finding.get("impact"):
+        impact = finding.get("impact")
+        if not (_non_empty_str(impact) if tightened else bool(impact)):
             errors.append(ValidationError(
                 "SECURITY_IMPACT_REQUIRED", path,
                 "security P0/P1 must state the impact path"))
@@ -476,7 +643,8 @@ def _validate_inventory(document: Dict[str, Any]) -> List[ValidationError]:
 
 
 def _validate_coverage_against_inventory(
-    document: Dict[str, Any], mode_name: str, block: Dict[str, Any]
+    document: Dict[str, Any], mode_name: str, block: Dict[str, Any],
+    tightened: bool = False,
 ) -> List[ValidationError]:
     """Cross-check a coverage block against the enumerated inventory.
 
@@ -490,6 +658,13 @@ def _validate_coverage_against_inventory(
         return errors
 
     path = f"coverage.{mode_name}"
+    # An unhashable item would raise here; report it instead of crashing.
+    unhashable = [i for i in items if not isinstance(i, (str, int, float, bool, tuple))]
+    if unhashable:
+        errors.append(ValidationError(
+            "INVALID_INVENTORY_ITEM", path,
+            f"inventory items must be scalars, got {len(unhashable)} that are not"))
+        items = [i for i in items if isinstance(i, (str, int, float, bool, tuple))]
     inventory_set = set(items)
 
     discovered = block.get("discovered")
@@ -499,8 +674,20 @@ def _validate_coverage_against_inventory(
             f"discovered {discovered} does not match {len(items)} enumerated items"))
 
     reviewed_items = block.get("reviewed_items")
-    if not isinstance(reviewed_items, list):
-        return errors
+    if reviewed_items is None:
+        # Omitting the names used to return early and skip every name-level rule
+        # below — including "FULL by name", the unaccounted-item check, and the
+        # contradictory-state check. Counting is exactly what rule 23 says is
+        # not enough, so the omission was a way to be graded on the count alone.
+        if tightened:
+            errors.append(ValidationError(
+                "REVIEWED_ITEMS_MISSING", path,
+                "an enumerated mode must name its reviewed items, not only count them"))
+        reviewed_items = []
+    elif not isinstance(reviewed_items, list):
+        errors.append(ValidationError(
+            "INVALID_REVIEWED_ITEMS", path, "reviewed_items must be a list"))
+        reviewed_items = []
 
     reviewed_set = set(reviewed_items)
     unknown = sorted(reviewed_set - inventory_set)
@@ -525,7 +712,29 @@ def _validate_coverage_against_inventory(
             "EXCLUDED_NOT_IN_INVENTORY", f"excluded",
             f"excluded items absent from the inventory: {', '.join(unknown_excluded)}"))
 
-    not_reviewed = set(block.get("not_reviewed") or [])
+    raw_not_reviewed = block.get("not_reviewed")
+    if raw_not_reviewed is not None and not isinstance(raw_not_reviewed, list):
+        # `set("/b")` becomes {'/', 'b'}, which accounts for nothing while
+        # looking like it accounted for something.
+        errors.append(ValidationError(
+            "INVALID_NOT_REVIEWED", path, "not_reviewed must be a list"))
+        raw_not_reviewed = []
+    not_reviewed = set(raw_not_reviewed or [])
+
+    unknown_not_reviewed = sorted(i for i in not_reviewed if i not in inventory_set)
+    if unknown_not_reviewed:
+        errors.append(ValidationError(
+            "NOT_REVIEWED_NOT_IN_INVENTORY", path,
+            "not_reviewed names items absent from the inventory: "
+            + ", ".join(unknown_not_reviewed)))
+
+    duplicate_reviewed = sorted({i for i in reviewed_items if reviewed_items.count(i) > 1})
+    if duplicate_reviewed:
+        # `reviewed` matching len(reviewed_items) is satisfied by repeating one
+        # name, which inflates the numerator the manifest exists to make checkable.
+        errors.append(ValidationError(
+            "REVIEWED_ITEMS_DUPLICATE", path,
+            f"reviewed_items repeats: {', '.join(duplicate_reviewed)}"))
 
     contradictory = sorted((reviewed_set & not_reviewed) | (reviewed_set & excluded_items))
     if contradictory:
@@ -559,12 +768,18 @@ def _validate_authorized_scope(document: Dict[str, Any]) -> List[ValidationError
     problem, independent of what was found.
     """
     scope = document.get("authorized_scope")
-    if not isinstance(scope, list) or not scope:
+    if scope is None:
         return []
+    # A bare string used to silently disable both scope rules: it is not a list,
+    # so the check returned early with no error at all. A malformed boundary must
+    # fail loudly — this is the one control nobody else is auditing.
+    if not isinstance(scope, list) or not scope:
+        return [ValidationError(
+            "INVALID_AUTHORIZED_SCOPE", "authorized_scope",
+            "authorized_scope must be a non-empty list of directory paths")]
 
     def in_scope(location: str) -> bool:
-        normalized = normalize_location(str(location or ""))
-        return any(normalized.startswith(normalize_location(prefix)) for prefix in scope)
+        return any(location_within(str(location or ""), str(prefix)) for prefix in scope)
 
     errors: List[ValidationError] = []
     for index, finding in enumerate(document.get("findings") or []):
@@ -572,7 +787,7 @@ def _validate_authorized_scope(document: Dict[str, Any]) -> List[ValidationError
             continue
         path = f"findings[{index}]"
         location = finding.get("location")
-        if location and location != "-" and not in_scope(location):
+        if location and location != NO_LOCATION and not in_scope(location):
             errors.append(ValidationError(
                 "OUT_OF_AUTHORIZED_SCOPE", path,
                 f"location {location!r} lies outside the authorized scope"))
@@ -580,7 +795,7 @@ def _validate_authorized_scope(document: Dict[str, Any]) -> List[ValidationError
             if not isinstance(record, dict):
                 continue
             evidence_location = record.get("location")
-            if evidence_location and evidence_location != "-" and not in_scope(evidence_location):
+            if evidence_location and evidence_location != NO_LOCATION and not in_scope(evidence_location):
                 errors.append(ValidationError(
                     "OUT_OF_AUTHORIZED_SCOPE", f"{path}.evidence[{evidence_index}]",
                     f"evidence location {evidence_location!r} lies outside the authorized scope"))
@@ -622,7 +837,9 @@ def diff_inventory(before: Iterable[str], after: Iterable[str]) -> Dict[str, Lis
     }
 
 
-def _validate_coverage(document: Dict[str, Any]) -> List[ValidationError]:
+def _validate_coverage(
+    document: Dict[str, Any], tightened: bool = False
+) -> List[ValidationError]:
     errors: List[ValidationError] = []
     coverage = document.get("coverage")
     if coverage is None:
@@ -644,12 +861,25 @@ def _validate_coverage(document: Dict[str, Any]) -> List[ValidationError]:
             errors.append(ValidationError(
                 "INVALID_COVERAGE_MODE", path, f"unknown coverage mode {mode!r}"))
 
+        # Defaulting an absent count to 0 made `{"mode": "FULL"}` valid, because
+        # 0 == 0 - 0: FULL coverage asserted with no denominator whatsoever.
+        missing_counts = [k for k in ("discovered", "excluded", "reviewed")
+                         if block.get(k) is None]
+        if missing_counts and tightened:
+            errors.append(ValidationError(
+                "COVERAGE_COUNTS_MISSING", path,
+                "coverage must state " + ", ".join(missing_counts)))
+            continue
+
         discovered = block.get("discovered", 0)
         excluded = block.get("excluded", 0)
         reviewed = block.get("reviewed", 0)
-        if not all(isinstance(v, int) for v in (discovered, excluded, reviewed)):
+        # `isinstance(True, int)` is True, so a bool satisfied every check below,
+        # and a negative count satisfied them too.
+        if not all(_is_count(v) for v in (discovered, excluded, reviewed)):
             errors.append(ValidationError(
-                "INVALID_COVERAGE", path, "discovered/excluded/reviewed must be integers"))
+                "INVALID_COVERAGE", path,
+                "discovered/excluded/reviewed must be non-negative integers"))
             continue
 
         denominator = discovered - excluded
@@ -665,7 +895,17 @@ def _validate_coverage(document: Dict[str, Any]) -> List[ValidationError]:
                 "FULL_COVERAGE_INCOMPLETE", path,
                 f"FULL requires reviewed == {denominator}, got {reviewed}"))
 
-        if mode == "SAMPLED" and not block.get("selection_method"):
+        # FULL over nothing is arithmetically true and substantively empty: a mode
+        # that reviewed no items may not report complete coverage of them.
+        if mode == "FULL" and denominator == 0:
+            errors.append(ValidationError(
+                "EMPTY_DENOMINATOR", path,
+                "FULL requires at least one non-excluded item; nothing was reviewed"))
+
+        selection = block.get("selection_method")
+        if mode == "SAMPLED" and not (
+            _non_empty_str(selection) if tightened else bool(selection)
+        ):
             errors.append(ValidationError(
                 "SAMPLING_METHOD_MISSING", path,
                 "SAMPLED requires a stated selection_method"))
@@ -676,7 +916,8 @@ def _validate_coverage(document: Dict[str, Any]) -> List[ValidationError]:
                 "EXCLUSION_COUNT_MISMATCH", path,
                 f"excluded {excluded} does not match {exclusion_count} listed exclusions"))
 
-        errors.extend(_validate_coverage_against_inventory(document, mode_name, block))
+        errors.extend(_validate_coverage_against_inventory(
+            document, mode_name, block, tightened))
 
     return errors
 
@@ -695,17 +936,20 @@ def validate_document(document: Dict[str, Any]) -> List[ValidationError]:
     if not isinstance(findings, list):
         return [ValidationError("INVALID_FINDINGS", "findings", "findings must be a list")]
 
+    tightened = is_tightened(document)
     seen_ids: set = set()
     fingerprint_identities: Dict[str, tuple] = {}
 
     for index, finding in enumerate(findings):
         path = f"findings[{index}]"
-        errors.extend(_validate_finding(finding, path))
+        errors.extend(_validate_finding(finding, path, tightened))
         if not isinstance(finding, dict):
             continue
 
         identifier = finding.get("id")
-        if identifier:
+        # An unhashable id would raise on `in`/`add`; the format rule has already
+        # reported it, so it is simply not tracked for uniqueness here.
+        if identifier and isinstance(identifier, (str, int)):
             if identifier in seen_ids:
                 errors.append(ValidationError(
                     "DUPLICATE_ID", path, f"id {identifier!r} appears more than once"))
@@ -713,9 +957,13 @@ def validate_document(document: Dict[str, Any]) -> List[ValidationError]:
 
         # One fingerprint must never describe two different problems.
         fingerprint = finding.get("fingerprint")
-        if fingerprint:
+        if fingerprint and isinstance(fingerprint, (str, int)):
+            # `rule` completes the triple the spec defines. It is optional, so a
+            # document omitting it keeps the older two-part identity — but two
+            # defects in one file can only be told apart when it is present.
             identity = (finding.get("category"),
-                        normalize_location(str(finding.get("location", ""))))
+                        normalize_location(str(finding.get("location", ""))),
+                        finding.get("rule"))
             previous = fingerprint_identities.get(fingerprint)
             if previous is not None and previous != identity:
                 errors.append(ValidationError(
@@ -727,14 +975,24 @@ def validate_document(document: Dict[str, Any]) -> List[ValidationError]:
     for index, finding in enumerate(findings):
         if not isinstance(finding, dict):
             continue
-        for dependency in finding.get("depends_on") or []:
+        depends_on = finding.get("depends_on")
+        if depends_on is None:
+            continue
+        # Iterating a non-list crashed on an int and walked characters on a
+        # string, reporting a dangling dependency on 'I'.
+        if not isinstance(depends_on, list):
+            errors.append(ValidationError(
+                "INVALID_DEPENDS_ON", f"findings[{index}]",
+                f"depends_on must be a list of ids, got {type(depends_on).__name__}"))
+            continue
+        for dependency in depends_on:
             if dependency not in seen_ids:
                 errors.append(ValidationError(
                     "DANGLING_DEPENDENCY", f"findings[{index}]",
                     f"depends_on references unknown id {dependency!r}"))
 
     errors.extend(_validate_inventory(document))
-    errors.extend(_validate_coverage(document))
+    errors.extend(_validate_coverage(document, tightened))
     errors.extend(_validate_authorized_scope(document))
 
     # The arithmetic and item-name checks can flag one problem twice; report once.
@@ -768,6 +1026,27 @@ def is_full_coverage(document: Dict[str, Any], mode_name: str) -> bool:
 # FIX_PLAN projection
 # ---------------------------------------------------------------------------
 
+def _one_line(value: Any) -> str:
+    """Flatten a value to a single line safe to interpolate into Markdown.
+
+    `to_fix_plan_md` writes `### [SEVERITY] ID — title` headings, so a newline
+    inside a title used to close the heading and let the rest of the string
+    become new headings — a verified injection that produced a fabricated
+    CRITICAL issue in the plan quality-loop then treated as real work. Leading
+    `#` is neutralised for the same reason.
+    """
+    if value is None:
+        return ""
+    # `split()` collapses every kind of whitespace, `\r` and U+2028 included, so a
+    # line break in any encoding cannot survive into the rendered heading.
+    text = " ".join(str(value).split())
+    # A leading `#` would open a heading of its own. Stripping to empty is fine:
+    # a title of only `#` characters carries no information to preserve, and an
+    # empty cell is more honest than a forged heading. (1.1 rejects such a title
+    # at the source anyway; this keeps the renderer safe for 1.0 documents.)
+    return text.lstrip("#").strip()
+
+
 def to_fix_plan_issues(document: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Project canonical findings onto the FIX_PLAN contract quality-loop reads.
 
@@ -800,6 +1079,10 @@ def to_fix_plan_md(document: Dict[str, Any], project: Optional[str] = None) -> s
     """Render FIX_PLAN.md in the format the existing parser already reads."""
     issues = to_fix_plan_issues(document)
     counts = {severity: 0 for severity in SEVERITIES}
+    # An unrecognised severity still has to appear somewhere: it used to be
+    # counted in the total but rendered in no group, so the issue vanished from
+    # the plan while the header claimed it was there.
+    unknown = [i for i in issues if i["severity"] not in counts]
     for issue in issues:
         if issue["severity"] in counts:
             counts[issue["severity"]] += 1
@@ -813,18 +1096,22 @@ def to_fix_plan_md(document: Dict[str, Any], project: Optional[str] = None) -> s
         "",
     ]
 
-    for severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
-        group = [i for i in issues if i["severity"] == severity]
+    groups = [(s_, [i for i in issues if i["severity"] == s_])
+              for s_ in ("CRITICAL", "HIGH", "MEDIUM", "LOW")]
+    if unknown:
+        groups.append(("UNKNOWN", unknown))
+
+    for severity, group in groups:
         if not group:
             continue
         lines += ["---", "", f"## {severity.capitalize()}", ""]
         for issue in group:
             lines += [
-                f"### [{severity}] {issue['id']} — {issue['title']}",
-                f"- **ID:** `{issue['id']}`",
-                f"- **File:** `{issue['file']}`",
-                f"- **Problem:** {issue['problem']}",
-                f"- **Fix:** {issue['fix']}",
+                f"### [{severity}] {_one_line(issue['id'])} — {_one_line(issue['title'])}",
+                f"- **ID:** `{_one_line(issue['id'])}`",
+                f"- **File:** `{_one_line(issue['file'])}`",
+                f"- **Problem:** {_one_line(issue['problem'])}",
+                f"- **Fix:** {_one_line(issue['fix'])}",
                 f"- **Status:** `{issue['status']}`",
                 "",
             ]
@@ -845,8 +1132,18 @@ def main() -> int:
     parser.add_argument("--fix-plan", help="Also write a FIX_PLAN.md projection here")
     args = parser.parse_args()
 
-    with open(args.path, encoding="utf-8") as handle:
-        document = parse_document(handle.read())
+    try:
+        with open(args.path, encoding="utf-8") as handle:
+            document = parse_document(handle.read())
+    except OSError as exc:
+        print(f"FAIL: cannot read {args.path}: {exc}")
+        return 1
+    except json.JSONDecodeError as exc:
+        print(f"FAIL: {args.path} is not valid JSON: {exc}")
+        return 1
+    if not isinstance(document, dict):
+        print(f"FAIL: {args.path} must contain a JSON object")
+        return 1
 
     errors = validate_document(document)
     if errors:

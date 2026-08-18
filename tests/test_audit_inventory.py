@@ -310,7 +310,8 @@ class TestCrossAuditComparison:
 class TestEvidenceAge:
     def make_finding_with_commit(self, commit=None):
         record = {"kind": "code-read", "location": "src/api/route.ts:42",
-                  "proves": "handler deletes without checking role"}
+                  "proves": "handler deletes without checking role",
+                  "quote": "export async function DELETE(req) { await db.user.delete(...) }"}
         if commit:
             record["commit"] = commit
         return {"id": "ISSUE-001", "fingerprint": "a" * 12, "title": "t",
@@ -321,13 +322,13 @@ class TestEvidenceAge:
     def test_evidence_commit_is_optional(self):
         """Audits without git context must keep working."""
         doc = make_doc(findings=[self.make_finding_with_commit()],
-                       coverage={"static": {"mode": "FULL", "discovered": 0,
+                       coverage={"static": {"mode": "PARTIAL", "discovered": 0,
                                             "excluded": 0, "reviewed": 0}})
         assert schema.validate_document(doc) == []
 
     def test_evidence_with_commit_is_valid(self):
         doc = make_doc(findings=[self.make_finding_with_commit("abc123def456")],
-                       coverage={"static": {"mode": "FULL", "discovered": 0,
+                       coverage={"static": {"mode": "PARTIAL", "discovered": 0,
                                             "excluded": 0, "reviewed": 0}})
         assert schema.validate_document(doc) == []
 
@@ -369,7 +370,7 @@ class TestEvidenceAge:
 
 class TestAuditAuthorization:
     def test_authorized_scope_is_optional(self):
-        doc = make_doc(coverage={"static": {"mode": "FULL", "discovered": 0,
+        doc = make_doc(coverage={"static": {"mode": "PARTIAL", "discovered": 0,
                                             "excluded": 0, "reviewed": 0}})
         assert schema.validate_document(doc) == []
 
@@ -381,9 +382,9 @@ class TestAuditAuthorization:
                    "location": "apps/other-tenant/src/api.ts:9",
                    "impact": "x",
                    "evidence": [{"kind": "code-read", "location": "apps/other-tenant/src/api.ts:9",
-                                 "proves": "y"}]}
+                                 "proves": "y", "quote": "return db.query(sql)"}]}
         doc = make_doc(findings=[finding],
-                       coverage={"static": {"mode": "FULL", "discovered": 0,
+                       coverage={"static": {"mode": "PARTIAL", "discovered": 0,
                                             "excluded": 0, "reviewed": 0}},
                        authorized_scope=["apps/admin/"])
         assert "OUT_OF_AUTHORIZED_SCOPE" in error_codes(doc)
@@ -394,9 +395,9 @@ class TestAuditAuthorization:
                    "priority": "P1", "status": "BROKEN", "confidence": "CONFIRMED",
                    "location": "apps/admin/src/api.ts:9", "impact": "x",
                    "evidence": [{"kind": "code-read", "location": "apps/admin/src/api.ts:9",
-                                 "proves": "y"}]}
+                                 "proves": "y", "quote": "return db.query(sql)"}]}
         doc = make_doc(findings=[finding],
-                       coverage={"static": {"mode": "FULL", "discovered": 0,
+                       coverage={"static": {"mode": "PARTIAL", "discovered": 0,
                                             "excluded": 0, "reviewed": 0}},
                        authorized_scope=["apps/admin/"])
         assert schema.validate_document(doc) == []
@@ -409,9 +410,9 @@ class TestAuditAuthorization:
                    "location": "apps/admin/src/api.ts:9",
                    "evidence": [{"kind": "code-read",
                                  "location": "apps/other-tenant/secrets.ts:1",
-                                 "proves": "y"}]}
+                                 "proves": "y", "quote": "return db.query(sql)"}]}
         doc = make_doc(findings=[finding],
-                       coverage={"static": {"mode": "FULL", "discovered": 0,
+                       coverage={"static": {"mode": "PARTIAL", "discovered": 0,
                                             "excluded": 0, "reviewed": 0}},
                        authorized_scope=["apps/admin/"])
         assert "OUT_OF_AUTHORIZED_SCOPE" in error_codes(doc)

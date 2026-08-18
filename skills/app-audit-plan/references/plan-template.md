@@ -49,6 +49,7 @@ One block per phase.
 Default sequence — drop a phase only with a stated reason:
 
 1. Inventory
+1b. Authorization sweep — shallow, one question, before functional verification
 2. Functional verification
 3. Architecture
 4. Security
@@ -61,6 +62,8 @@ Default sequence — drop a phase only with a stated reason:
 ## 4. Execution order and parallelism
 
 - Inventory is a prerequisite for everything else.
+- Phase 1b follows inventory immediately and precedes Phase 2, so an audit cut
+  short still carries its highest-severity findings.
 - Phases 3, 4, and 5 are independent and can run concurrently where the
   environment supports subagents or worktrees.
 - Phase 6 needs the results of Phase 2 across all modules.

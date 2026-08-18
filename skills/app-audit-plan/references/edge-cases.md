@@ -25,6 +25,10 @@ look for in code — not what to click.
 | Simultaneous status change | Can two users move the same record into conflicting states? |
 | Import of a malformed file | Validated before applying? All-or-nothing, or partial import with no report? |
 | Export of a large set | Streamed or buffered fully in memory? Authorized per record? |
+| Money arithmetic | Are amounts integers (minor units) or `Decimal`, or binary floats? Is rounding direction defined and applied once, not per intermediate step? Do multi-currency conversions record the rate used? Off-by-a-cent errors compound and reconcile to nothing. |
+| Schema migration | Is a dropped or renamed column released together with the code that stops reading it, or does the old version break mid-deploy? Is a backfill batched, or one statement locking a large table? Is there a down path? |
+| Feature flag | What happens in each state of a flag nobody flips? A flag gating a security control, defaulting open, is an authorization finding. A flag whose off-branch no longer compiles against current code is dead functionality that looks live. |
+| Timezone and locale boundary | Are day boundaries computed in the user's zone or the server's? Is a date-only value stored as a timestamp and shifted by conversion? Does number or date parsing depend on the process locale? Applies where the audited area genuinely spans zones or locales. |
 
 ## Dead and half-wired code patterns
 
@@ -46,6 +50,19 @@ explicitly — none is visible from the component's own source alone.
 | Frontend bypasses its own authenticated proxy | Compare each client base URL against the backend's proxy routes. A direct call to the upstream service skips auth and permission checks. |
 | Placeholder persistence | Search for fabricated paths, hardcoded IDs, and comments like "would need backend" near save handlers. The record saves; the referenced artifact was never stored. |
 | Field submitted but absent from the server contract | Compare form fields against the request DTO. A field the server ignores produces a success message and no change. |
+
+## Background jobs and queues
+
+Jobs are inventoried in Phase 1 but fail in ways a request never does. For each
+job in scope:
+
+| Case | What to look for |
+|---|---|
+| Job raises | Retried, dead-lettered, or silently swallowed? Does a `catch` that logs count as handling? |
+| Poison message | Does one permanently-failing item block the queue, or retry forever? Is there an attempt limit? |
+| Duplicate delivery | At-least-once delivery means the handler runs twice — is the side effect idempotent? (Judge with retry, per `finding-model.md` §6.) |
+| Job never runs | Is the schedule registered anywhere, and does anything alert when a run is missed? A job nobody scheduled is dead code with a plausible name. |
+| Overlapping runs | Can a long run still be executing when the next one starts? Is there a lock? |
 
 ## Notes
 

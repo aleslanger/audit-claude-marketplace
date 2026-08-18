@@ -206,7 +206,9 @@ Coverage is computed from the Phase 1 inventory, never estimated.
 coverage = reviewed / (discovered - excluded)
 ```
 
-- `discovered` — items enumerated from the filesystem and router config.
+- `discovered` — items enumerated from the codebase in the unit named for this
+  target (routes, endpoints, commands, public API, consumers). The unit is
+  chosen in Phase 1; see `audit-phases.md`.
 - `excluded` — deliberately out of scope, each with a stated reason. Counted and
   listed, never silently dropped.
 - `reviewed` — items actually examined and carrying a status.
